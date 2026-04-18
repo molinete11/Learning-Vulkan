@@ -19,11 +19,15 @@ int main(){
 
     while(is_running){
         X11Event e = x11_poll_next_event(&window);
-        if(e == X11_CLOSE_WINDOW){
+        switch (e)
+        {
+        case X11_CLOSE_WINDOW:
             is_running = 0;
+            break;
+        default:
+            break;
         }
     }
     
-
     return EXIT_SUCCESS;
 }

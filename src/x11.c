@@ -62,6 +62,7 @@ X11Window x11_create_window(const int width, const int height, const char *title
     window.connection = connection;
     window.resizable = 1;
     window.close_window = close_event;
+    window.screen = screen;
 
     return window;
 }
@@ -73,9 +74,14 @@ void x11_set_window_resizable(X11Window *window, char is_resizable)
         xcb_icccm_size_hints_set_min_size(&w_size_hints, window->w, window->h);
         xcb_icccm_size_hints_set_max_size(&w_size_hints, window->w, window->h);
         xcb_icccm_set_wm_size_hints(window->connection, window->wid, XCB_ATOM_WM_NORMAL_HINTS, &w_size_hints);
+        window->resizable = 0;
         
     }else if(is_resizable && !window->resizable){
-        
+        xcb_size_hints_t w_size_hints;
+        xcb_icccm_size_hints_set_min_size(&w_size_hints, 10, 10);
+        xcb_icccm_size_hints_set_max_size(&w_size_hints, INT32_MAX, INT32_MAX);
+        xcb_icccm_set_wm_size_hints(window->connection, window->wid, XCB_ATOM_WM_NORMAL_HINTS, &w_size_hints);
+        window->resizable = 1;
     }
 
     assert(xcb_flush(window->connection));
@@ -100,8 +106,26 @@ X11Event x11_poll_next_event(X11Window *window)
             }
             break;
         
-            default:
-                return X11_NONE;
-                break;
+        default:
+            return X11_NONE;
+            break;
     }
+}
+
+VkResult vkw_create_xcb_surface(
+                                VkInstance instance, 
+                                const VkAllocationCallbacks * pAllocator, 
+                                VkSurfaceKHR * pSurface,
+                                X11Window * window
+                            )
+{
+    VkXcbSurfaceCreateInfoKHR info = {
+        .sType = VK_STRUCTURE_TYPE_XCB_SURFACE_CREATE_INFO_KHR,
+        .pNext = NULL,
+        .flags = 0,
+        .connection = window->connection,
+        .window = window->wid,
+    };
+
+    return vkCreateXcbSurfaceKHR(instance, &info, pAllocator, pSurface);
 }
