@@ -1,0 +1,7 @@
+
+build:
+	gcc src/x11.c src/vk_triangle.c -o test -lxcb -lxcb-util -lxcb-icccm
+
+
+clean:
+	rm -r test
