@@ -6,7 +6,6 @@
 #include <string.h>
 
 
-
 X11Window x11_create_window(const int width, const int height, const char *title)
 {
     X11Window window = { 0 };
@@ -45,7 +44,11 @@ X11Window x11_create_window(const int width, const int height, const char *title
         XCB_CW_EVENT_MASK | XCB_CW_BACK_PIXEL,
         &(xcb_create_window_value_list_t){
             .background_pixel = screen->black_pixel,
-            .event_mask =  XCB_EVENT_MASK_EXPOSURE
+            .event_mask =  XCB_EVENT_MASK_EXPOSURE | 
+                           XCB_EVENT_MASK_KEY_PRESS |
+                           XCB_EVENT_MASK_BUTTON_PRESS |
+                           XCB_EVENT_MASK_BUTTON_RELEASE |
+                           XCB_EVENT_MASK_BUTTON_MOTION,
         }
     );    
 
@@ -102,15 +105,21 @@ X11Event x11_poll_next_event(X11Window *window)
             xcb_client_message_data_t m_data = message->data;
 
             if(m_data.data32[0] == window->close_window){
+                free(e);
                 return X11_CLOSE_WINDOW;
             }
             break;
-        
+        case XCB_BUTTON_PRESS:
+        case XCB_KEY_PRESS:
+        case XCB_KEY_RELEASE:
         default:
+            free(e);
             return X11_NONE;
             break;
     }
 }
+
+#ifdef VULKAN_CORE_H_
 
 VkResult vkw_create_xcb_surface(
                                 VkInstance instance, 
@@ -129,3 +138,5 @@ VkResult vkw_create_xcb_surface(
 
     return vkCreateXcbSurfaceKHR(instance, &info, pAllocator, pSurface);
 }
+
+#endif

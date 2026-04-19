@@ -1,9 +1,15 @@
+#ifndef X11_H
+#define X11_H
+
 #include <xcb/xcb.h>
 #include <xcb/xcb_util.h>
 #include <xcb/xcb_icccm.h>
 
-#include <vulkan/vulkan.h>
-#include <vulkan/vulkan_xcb.h>
+
+
+#ifdef VULKAN_CORE_H_
+    #include <vulkan/vulkan_xcb.h>
+#endif
 
 typedef struct {
     xcb_connection_t *connection;
@@ -17,17 +23,24 @@ typedef struct {
 typedef enum {
     X11_NONE,
     X11_CLOSE_WINDOW,
+    X11_KEY_PRESS,
+    X11_KEY_RELEASED,
+    X11_MAX
 }X11Event;
 
 X11Window x11_create_window(const int width, const int height, const char * title);
 void x11_set_window_resizable(X11Window *window, char is_resizable);
 
-
 X11Event x11_poll_next_event(X11Window *window);
 
-VkResult vkw_create_xcb_surface(
-                                VkInstance instance, 
-                                const VkAllocationCallbacks * pAllocator,
-                                VkSurfaceKHR * pSurface,
-                                X11Window * window
-                            );
+#ifdef VULKAN_CORE_H_
+
+    VkResult vkw_create_xcb_surface(
+                                    VkInstance instance, 
+                                    const VkAllocationCallbacks * pAllocator,
+                                    VkSurfaceKHR * pSurface,
+                                    X11Window * window
+                                );
+#endif
+
+#endif // X11_H
