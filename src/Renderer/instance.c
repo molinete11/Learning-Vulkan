@@ -1,4 +1,5 @@
 #include "instance.h"
+#include "util.h"
 
 #include <stdio.h>
 
@@ -27,11 +28,9 @@ VkInstance create_instance(){
     info.pApplicationInfo = &app_info;
     info.flags = 0;
 
-    if(vkCreateInstance(&info, NULL, &instance) != VK_SUCCESS){
-        printf("[FATAL ERROR]:\tfailed to create vk instance\n");
-    }else{
-        printf("[INFO]:\tvk instance created\n");
-    }
+    vk_call(vkCreateInstance(&info, NULL, &instance), 
+            "vk instance created", 
+            "failed to create vk instance");
 
     return instance;
 }
