@@ -2,7 +2,7 @@
 #define RENDERER_UTIL_H
 
 #include <stdio.h>
-#include <stdarg.h>
+#include <stdlib.h>
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_enum_string_helper.h>
@@ -25,11 +25,16 @@ typedef enum {
     ERROR
 }SeverityLog;
 
-static inline void vk_call(VkResult res, const char *success_message, const char *fail_message){
+static inline void vkCall(VkResult res, const char *success_message, const char *fail_message){
     if(res != VK_SUCCESS){
-        ERROR_LOG("%s, reason: %s", fail_message, string_VkResult(res));
+        if(fail_message != NULL){
+            ERROR_LOG("%s, reason: %s", fail_message, string_VkResult(res));
+            exit(EXIT_FAILURE);
+        }
     }else{
-        INFO_LOG("%s", success_message);
+        if(success_message != NULL){
+            INFO_LOG("%s", success_message);
+        }   
     }
 }
 

@@ -12,8 +12,15 @@
 
 typedef struct {
     VkInstance instance;
+    VkPhysicalDevice GPUselected;
+
+    VkDevice logicalDevice;
+    VkQueue graphicsPresentationQueue;
+
+    VkSurfaceKHR surface;
+    VkSwapchainKHR swapchain;
+
     VkDebugUtilsMessengerEXT debugMessenger;
-    VkPhysicalDevice physical_device;
 }Renderer;
 
 
