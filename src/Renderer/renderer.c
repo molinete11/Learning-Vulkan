@@ -60,7 +60,7 @@ VkInstance create_instance()
     app_info.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
     app_info.pEngineName = NULL;
     app_info.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-    app_info.apiVersion = VK_API_VERSION_1_0;
+    app_info.apiVersion = VK_API_VERSION_1_3;
 
     info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     info.pNext = NULL;
