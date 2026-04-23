@@ -1,4 +1,3 @@
-
 #include "x11.h"
 #include "Renderer/renderer.h"
 
@@ -24,8 +23,6 @@ int main(){
         if(e == X11_CLOSE_WINDOW){
             is_running = 0;
         }
-
-
     }
     
     return EXIT_SUCCESS;
