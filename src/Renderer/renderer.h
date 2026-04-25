@@ -20,6 +20,13 @@ typedef struct {
     VkSurfaceKHR surface;
     VkSwapchainKHR swapchain;
 
+    uint32_t imageCount;
+    VkImage *images;
+    VkImageView *imagesViews;
+
+    VkPipeline graphicsPipeline;
+    VkPipelineLayout graphicsPipelineLayout;
+
     VkDebugUtilsMessengerEXT debugMessenger;
 }Renderer;
 

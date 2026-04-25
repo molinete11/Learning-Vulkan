@@ -1,6 +1,7 @@
 
 
 #include "renderer.h"
+#include "../Math/types.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -11,7 +12,8 @@ const char* validation_layers[] = {
 
 const char *requiredGPUextensions[] = {
     "VK_KHR_dynamic_rendering",
-    "VK_KHR_swapchain"
+    "VK_KHR_swapchain",
+    "VK_EXT_extended_dynamic_state3",
 };
 
 void init_vulkan(Renderer *renderer, X11Window *window);
@@ -20,6 +22,9 @@ void getPhysicalDevice(Renderer *renderer);
 void createLogicalDevice(Renderer *renderer);
 void createSurface(Renderer *renderer, X11Window *window);
 void createSwapchainKHR(Renderer *renderer);
+void getSwapchainImages(Renderer *renderer);
+void createImageViews(Renderer *renderer);
+void createGraphicsPipeline(Renderer *renderer);
 
 void setupDebugMessenger(Renderer *renderer);
 
@@ -29,6 +34,9 @@ static const char** get_required_extensions();
 static Bool checkValidationLayerSupport();
 static void populateDebugUtilsMessengerCreateInfoEXT(VkDebugUtilsMessengerCreateInfoEXT *info);
 static VkSurfaceFormatKHR getSurfaceFormats(VkPhysicalDevice GPU, VkSurfaceKHR surface);
+static VkPresentModeKHR getPresentationMode(VkPhysicalDevice GPU, VkSurfaceKHR surface);
+static VkShaderModule createShaderModule(VkDevice logicalDevice, const char *shader);
+
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
     VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
@@ -59,6 +67,9 @@ void init_vulkan(Renderer *renderer, X11Window *window)
     getPhysicalDevice(renderer);
     createLogicalDevice(renderer);
     createSwapchainKHR(renderer);
+    getSwapchainImages(renderer);
+    createImageViews(renderer);
+    createGraphicsPipeline(renderer);
 }
 
 void create_instance(Renderer *renderer)
@@ -168,14 +179,14 @@ void createLogicalDevice(Renderer *renderer)
     logicalDeviceInfo.flags = 0;
     logicalDeviceInfo.queueCreateInfoCount = 1;
     logicalDeviceInfo.pQueueCreateInfos = &queueInfo;
-    logicalDeviceInfo.enabledExtensionCount = 1;
+    logicalDeviceInfo.enabledExtensionCount = 3;
     logicalDeviceInfo.ppEnabledExtensionNames = requiredGPUextensions;
     logicalDeviceInfo.pEnabledFeatures = NULL;
 
 
     vkCall(vkCreateDevice(renderer->GPUselected, &logicalDeviceInfo, NULL, &renderer->logicalDevice), 
-            "logical device created", 
-            "failed to create logical device");
+            "Logical device created", 
+            "Failed to create logical device");
 
 
     vkGetDeviceQueue(renderer->logicalDevice, queueFamilyIndex, 0, &renderer->graphicsPresentationQueue);
@@ -191,24 +202,171 @@ void createSurface(Renderer *renderer, X11Window *window)
 
 void createSwapchainKHR(Renderer *renderer)
 {
-
     VkSurfaceCapabilitiesKHR surfaceCapabilities = { 0 };
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(renderer->GPUselected, renderer->surface, &surfaceCapabilities);
 
+    VkSurfaceFormatKHR surfaceFormat = getSurfaceFormats(renderer->GPUselected, renderer->surface);
+
+    getPresentationMode(renderer->GPUselected, renderer->surface);
+
     VkSwapchainCreateInfoKHR swapchainInfo = { 0 };
+
+    INFO_LOG("min image count: %u", surfaceCapabilities.minImageCount);
 
     swapchainInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
     swapchainInfo.pNext = NULL;
     swapchainInfo.flags = 0;
     swapchainInfo.surface = renderer->surface;
     swapchainInfo.minImageCount = surfaceCapabilities.minImageCount;
-    //swapchainInfo.imageFormat = getSurfaceFormats(renderer->GPUselected, renderer->surface).format;
+    swapchainInfo.imageFormat = surfaceFormat.format;
+    swapchainInfo.imageColorSpace = surfaceFormat.colorSpace;
+    swapchainInfo.imageExtent = surfaceCapabilities.currentExtent;
+    swapchainInfo.imageArrayLayers = 1;
+    swapchainInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    swapchainInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    swapchainInfo.preTransform = surfaceCapabilities.currentTransform;
+    swapchainInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    swapchainInfo.presentMode = getPresentationMode(renderer->GPUselected, renderer->surface);
+    swapchainInfo.clipped = VK_FALSE;
+    swapchainInfo.oldSwapchain = VK_NULL_HANDLE;
 
-    getSurfaceFormats(renderer->GPUselected, renderer->surface);
+    vkCall(vkCreateSwapchainKHR(renderer->logicalDevice, &swapchainInfo, NULL, &renderer->swapchain),
+            "Swapchain created",
+           "failed to create swapchain");
+}
 
-    //vkCall(vkCreateSwapchainKHR(renderer->logicalDevice, NULL, NULL, &renderer->swapchain),
-    //        "Swapchain created",
-    //        "failed to create swapchain");
+void getSwapchainImages(Renderer *renderer)
+{
+    uint32_t nImages = 0;
+    vkCall(vkGetSwapchainImagesKHR(renderer->logicalDevice, renderer->swapchain, &nImages, NULL), NULL, NULL);
+
+    renderer->images = calloc(nImages, sizeof(VkImage));
+    renderer->imagesViews = calloc(nImages, sizeof(VkImageView));
+    renderer->imageCount = nImages;
+
+    if(renderer->images == NULL || renderer->imagesViews == NULL){
+        ERROR_LOG("Failed to allocate images");
+    }else{
+        INFO_LOG("Images allocated");
+    }
+
+    vkCall(vkGetSwapchainImagesKHR(renderer->logicalDevice, renderer->swapchain, &nImages, renderer->images), 
+            "Swapchain images obtained",
+             "Failed to get swapchain images");
+
+    INFO_LOG("Image count: %u", nImages);
+}
+
+void createImageViews(Renderer *renderer)
+{
+    VkFormat format = getSurfaceFormats(renderer->GPUselected, renderer->surface).format;
+
+    VkComponentMapping componentMapping = { 0 };
+    componentMapping.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+    componentMapping.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+    componentMapping.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+    componentMapping.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+
+    VkImageSubresourceRange  imageSubresourceRange = { 0 };
+
+    imageSubresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    imageSubresourceRange.layerCount = 1;
+    imageSubresourceRange.levelCount = 1;
+    imageSubresourceRange.baseArrayLayer = 0;
+    imageSubresourceRange.baseMipLevel = 0;
+
+    for(int i = 0; i < renderer->imageCount; i++){
+
+        VkImageViewCreateInfo imageViewInfo = { 0 };
+        imageViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        imageViewInfo.pNext = NULL;
+        imageViewInfo.flags = 0;
+        imageViewInfo.image = renderer->images[i];
+        imageViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        imageViewInfo.format = format;
+        imageViewInfo.components = componentMapping;
+        imageViewInfo.subresourceRange = imageSubresourceRange;
+
+        vkCall(vkCreateImageView(renderer->logicalDevice, &imageViewInfo, NULL, &renderer->imagesViews[i]),
+                NULL, NULL);
+
+        INFO_LOG("ImageView %d Created", i);
+    }
+}
+
+void createGraphicsPipeline(Renderer *renderer)
+{
+
+    VkShaderModule vertexModule = createShaderModule(renderer->logicalDevice, "vert.spv");
+    VkShaderModule fragmentModule = createShaderModule(renderer->logicalDevice, "frag.spv");
+
+    VkPipelineShaderStageCreateInfo vertexShaderStage = { 0 };
+    vertexShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vertexShaderStage.pNext = NULL;
+    vertexShaderStage.flags = 0;
+    vertexShaderStage.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    vertexShaderStage.module = vertexModule;
+    vertexShaderStage.pName = "main";
+    vertexShaderStage.pSpecializationInfo = NULL;
+
+    VkPipelineShaderStageCreateInfo fragmentShaderStage = { 0 };
+    fragmentShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    fragmentShaderStage.pNext = NULL;
+    fragmentShaderStage.flags = 0;
+    fragmentShaderStage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    fragmentShaderStage.module = fragmentModule;
+    fragmentShaderStage.pName = "main";
+    fragmentShaderStage.pSpecializationInfo = NULL;
+
+    VkPipelineShaderStageCreateInfo stages[] = {vertexShaderStage, fragmentShaderStage}; 
+
+    VkVertexInputBindingDescription bindingDescription = { 0 };
+    bindingDescription.binding = 0;
+    bindingDescription.stride = sizeof(vec3);
+    bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    
+    VkVertexInputAttributeDescription attributeDescription = { 0 };
+    attributeDescription.location = 0;
+    attributeDescription.binding = 0;
+    attributeDescription.format = VK_FORMAT_R32G32B32_SFLOAT;
+    attributeDescription.offset = 0;
+
+    VkPipelineVertexInputStateCreateInfo vertexInputState = { 0 };
+
+    vertexInputState.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vertexInputState.pNext = NULL;
+    vertexInputState.flags = 0;
+    vertexInputState.vertexBindingDescriptionCount = 1;
+    vertexInputState.pVertexBindingDescriptions = &bindingDescription;
+    vertexInputState.vertexAttributeDescriptionCount = 1;
+    vertexInputState.pVertexAttributeDescriptions = &attributeDescription;
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = { 0 };
+    inputAssemblyState.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    inputAssemblyState.pNext = NULL;
+    inputAssemblyState.flags = 0;
+    inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    inputAssemblyState.primitiveRestartEnable = VK_FALSE;
+
+    VkPipelineRasterizationStateCreateInfo rasterization = { 0 };
+    rasterization;
+
+    VkGraphicsPipelineCreateInfo graphicsPipelineInfo = { 0 };
+
+    graphicsPipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    graphicsPipelineInfo.pNext = NULL;
+    graphicsPipelineInfo.flags = VK_PIPELINE_CREATE_2_DISABLE_OPTIMIZATION_BIT;
+    graphicsPipelineInfo.stageCount = 2;
+    graphicsPipelineInfo.pStages = stages;
+    graphicsPipelineInfo.pVertexInputState = &vertexInputState;
+    graphicsPipelineInfo.pInputAssemblyState = &inputAssemblyState;
+    graphicsPipelineInfo.pTessellationState = NULL;
+    graphicsPipelineInfo.pViewportState = NULL;
+    graphicsPipelineInfo.pRasterizationState = &rasterization;
+
+
+
+    //vkCreateGraphicsPipelines(renderer->logicalDevice, NULL, 1, NULL, NULL, &renderer->graphicsPipeline);
 }
 
 void setupDebugMessenger(Renderer *renderer)
@@ -393,9 +551,46 @@ VkSurfaceFormatKHR getSurfaceFormats(VkPhysicalDevice GPU, VkSurfaceKHR surface)
         if(surfaceFormats[i].format == VK_FORMAT_B8G8R8A8_SRGB){
             return surfaceFormats[i];
         }
-    }
+    }       
 
     return surfaceFormats[0];
+}
+
+VkPresentModeKHR getPresentationMode(VkPhysicalDevice GPU, VkSurfaceKHR surface)
+{
+    uint32_t nPresentationModes = 0;
+    vkGetPhysicalDeviceSurfacePresentModesKHR(GPU, surface, &nPresentationModes, NULL);
+
+    VkPresentModeKHR presentationModes[nPresentationModes];
+
+    vkGetPhysicalDeviceSurfacePresentModesKHR(GPU, surface, &nPresentationModes, presentationModes);
+
+    for(int i = 0; i < nPresentationModes; i++){
+        if(presentationModes[i] == VK_PRESENT_MODE_FIFO_KHR){
+            return presentationModes[i];
+        }
+    }
+}
+
+VkShaderModule createShaderModule(VkDevice logicalDevice, const char *shader)
+{
+    VkShaderModule shaderModule;
+
+    FileInfo fileInfo = readFile(shader);
+
+    VkShaderModuleCreateInfo shaderInfo = { 0 };
+
+    shaderInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    shaderInfo.pNext = NULL;
+    shaderInfo.codeSize = fileInfo.size;
+    shaderInfo.pCode = (uint32_t*)fileInfo.byteCode;
+    shaderInfo.flags = 0;
+
+    vkCall(vkCreateShaderModule(logicalDevice, &shaderInfo, NULL, &shaderModule), "module created", "failed to create module");
+
+    free(fileInfo.byteCode);
+
+    return shaderModule;
 }
 
 VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
