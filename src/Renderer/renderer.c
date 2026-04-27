@@ -1,5 +1,5 @@
 
-
+#include "util.h"
 #include "renderer.h"
 #include "../Math/types.h"
 
@@ -24,7 +24,12 @@ void createSurface(Renderer *renderer, X11Window *window);
 void createSwapchainKHR(Renderer *renderer);
 void getSwapchainImages(Renderer *renderer);
 void createImageViews(Renderer *renderer);
+void createGraphicsPipelineLayout(Renderer *renderer);
 void createGraphicsPipeline(Renderer *renderer);
+void createCommandPool(Renderer *renderer);
+void createFrames(Renderer *renderer);
+
+Frame allocFrame(Renderer *renderer);
 
 void setupDebugMessenger(Renderer *renderer);
 
@@ -37,6 +42,18 @@ static VkSurfaceFormatKHR getSurfaceFormats(VkPhysicalDevice GPU, VkSurfaceKHR s
 static VkPresentModeKHR getPresentationMode(VkPhysicalDevice GPU, VkSurfaceKHR surface);
 static VkShaderModule createShaderModule(VkDevice logicalDevice, const char *shader);
 
+static VkCommandBuffer allocCommandBuffer(VkCommandPool commandPool, VkDevice ldevice);
+
+static void transitionImageLayout(
+    VkCommandBuffer cmd,
+    VkImage image,
+    VkImageLayout oldLayout,
+    VkImageLayout newLayout,
+    VkAccessFlags2 srcAccesFlags,
+    VkAccessFlags2 dstAccesFlags,
+    VkPipelineStageFlags2 srcStageFlags,
+    VkPipelineStageFlags2 dstStageFlags
+);
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
     VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
@@ -59,6 +76,35 @@ Renderer init_renderer(X11Window *window)
     return renderer;
 }
 
+Frame *beginRenderning(Renderer *renderer)
+{
+    Frame *frame = &renderer->frames;
+
+    vkCall(vkWaitForFences(renderer->logicalDevice, 1, &frame->fence, VK_TRUE, UINT64_MAX),
+            NULL,
+            "failed to wait for fence");
+
+    VkCommandBufferBeginInfo bufferInfo = { 0 };
+    bufferInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    bufferInfo.pNext = NULL;
+    bufferInfo.flags = 0;
+    bufferInfo.pInheritanceInfo = NULL;
+
+    vkBeginCommandBuffer(frame->cmd, &bufferInfo);
+
+    transitionImageLayout(frame->cmd, );
+
+    return frame;
+}
+
+void endRendering(Renderer *renderer, Frame *frame)
+{
+}
+
+void renderTriangle(Frame *frame)
+{
+}
+
 void init_vulkan(Renderer *renderer, X11Window *window)
 {   
     create_instance(renderer);
@@ -69,7 +115,9 @@ void init_vulkan(Renderer *renderer, X11Window *window)
     createSwapchainKHR(renderer);
     getSwapchainImages(renderer);
     createImageViews(renderer);
+    createGraphicsPipelineLayout(renderer);
     createGraphicsPipeline(renderer);
+    createCommandPool(renderer);
 }
 
 void create_instance(Renderer *renderer)
@@ -86,7 +134,7 @@ void create_instance(Renderer *renderer)
     app_info.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
     app_info.pEngineName = NULL;
     app_info.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-    app_info.apiVersion = VK_API_VERSION_1_3;
+    app_info.apiVersion = VK_API_VERSION_1_4;
 
     info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     info.pNext = NULL;
@@ -171,11 +219,14 @@ void createLogicalDevice(Renderer *renderer)
     queueInfo.queueCount = 1;
     queueInfo.pQueuePriorities = &priorities;
     
+    VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamicRendering = { 0 };
+    dynamicRendering.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
+    dynamicRendering.dynamicRendering = VK_TRUE;
 
     VkDeviceCreateInfo logicalDeviceInfo = { 0 };
 
     logicalDeviceInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    logicalDeviceInfo.pNext = NULL;
+    logicalDeviceInfo.pNext = (VkPhysicalDeviceDynamicRenderingFeaturesKHR*)&dynamicRendering;
     logicalDeviceInfo.flags = 0;
     logicalDeviceInfo.queueCreateInfoCount = 1;
     logicalDeviceInfo.pQueueCreateInfos = &queueInfo;
@@ -294,9 +345,21 @@ void createImageViews(Renderer *renderer)
     }
 }
 
+void createGraphicsPipelineLayout(Renderer *renderer)
+{
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo = { 0 };
+    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutInfo.setLayoutCount = 0;
+    pipelineLayoutInfo.pushConstantRangeCount = 0;
+
+
+    vkCall(vkCreatePipelineLayout(renderer->logicalDevice, &pipelineLayoutInfo, NULL, &renderer->graphicsPipelineLayout), 
+            "pipeline layout created",
+            "failed to create pipeline layout");
+}
+
 void createGraphicsPipeline(Renderer *renderer)
 {
-
     VkShaderModule vertexModule = createShaderModule(renderer->logicalDevice, "vert.spv");
     VkShaderModule fragmentModule = createShaderModule(renderer->logicalDevice, "frag.spv");
 
@@ -348,25 +411,104 @@ void createGraphicsPipeline(Renderer *renderer)
     inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     inputAssemblyState.primitiveRestartEnable = VK_FALSE;
 
+    VkPipelineViewportStateCreateInfo viewPort = { 0 };
+    viewPort.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewPort.scissorCount = 1;
+    viewPort.viewportCount = 1;
+
     VkPipelineRasterizationStateCreateInfo rasterization = { 0 };
-    rasterization;
+    rasterization.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterization.pNext = NULL;
+    rasterization.flags = 0;
+    rasterization.rasterizerDiscardEnable = VK_FALSE;
+    rasterization.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterization.cullMode = VK_CULL_MODE_BACK_BIT;
+    rasterization.frontFace = VK_FRONT_FACE_CLOCKWISE;
+    rasterization.depthBiasClamp = VK_FALSE;
+    rasterization.lineWidth = 1;
+
+    VkPipelineMultisampleStateCreateInfo multisampleInfo = { 0 };
+    multisampleInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisampleInfo.sampleShadingEnable = VK_FALSE;
+    multisampleInfo.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineColorBlendAttachmentState colorBlendAttachment = { 0 };
+    colorBlendAttachment.blendEnable = VK_FALSE;
+    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+    VkPipelineColorBlendStateCreateInfo colorBlendingState = { 0 };
+    colorBlendingState.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    colorBlendingState.pNext = NULL;
+    colorBlendingState.flags = 0;
+    colorBlendingState.logicOpEnable = VK_FALSE;
+    colorBlendingState.attachmentCount = 1;
+    colorBlendingState.pAttachments = &colorBlendAttachment;
+
+    VkDynamicState dynamicStates[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+
+    VkPipelineDynamicStateCreateInfo dynamicStatesInfo = { 0 };
+    dynamicStatesInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dynamicStatesInfo.pNext = 0;
+    dynamicStatesInfo.flags = 0;
+    dynamicStatesInfo.dynamicStateCount = 2;
+    dynamicStatesInfo.pDynamicStates = dynamicStates;
+
+    VkSurfaceFormatKHR surfaceFormat = getSurfaceFormats(renderer->GPUselected, renderer->surface);
+
+    VkPipelineRenderingCreateInfo renderingInfo = { 0 };
+    renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+    renderingInfo.colorAttachmentCount = 1;
+    renderingInfo.pColorAttachmentFormats = &surfaceFormat.format;
 
     VkGraphicsPipelineCreateInfo graphicsPipelineInfo = { 0 };
 
     graphicsPipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    graphicsPipelineInfo.pNext = NULL;
+    graphicsPipelineInfo.pNext = &renderingInfo;
     graphicsPipelineInfo.flags = VK_PIPELINE_CREATE_2_DISABLE_OPTIMIZATION_BIT;
     graphicsPipelineInfo.stageCount = 2;
     graphicsPipelineInfo.pStages = stages;
     graphicsPipelineInfo.pVertexInputState = &vertexInputState;
     graphicsPipelineInfo.pInputAssemblyState = &inputAssemblyState;
     graphicsPipelineInfo.pTessellationState = NULL;
-    graphicsPipelineInfo.pViewportState = NULL;
+    graphicsPipelineInfo.pViewportState = &viewPort;
     graphicsPipelineInfo.pRasterizationState = &rasterization;
+    graphicsPipelineInfo.pMultisampleState = &multisampleInfo;
+    graphicsPipelineInfo.pColorBlendState = &colorBlendingState;
+    graphicsPipelineInfo.pDynamicState = &dynamicStatesInfo;
+    graphicsPipelineInfo.layout = renderer->graphicsPipelineLayout;
+    graphicsPipelineInfo.renderPass = NULL;
 
+    vkCall(vkCreateGraphicsPipelines(renderer->logicalDevice, NULL, 1, &graphicsPipelineInfo, NULL, &renderer->graphicsPipeline),
+        "Graphics pipeline created",
+        "failed to create graphics pipeline");
+}
 
+void createCommandPool(Renderer *renderer)
+{
+    uint32_t queueFamilyIndex =  getQueueFamilyIndex(renderer->GPUselected, renderer->surface);
 
-    //vkCreateGraphicsPipelines(renderer->logicalDevice, NULL, 1, NULL, NULL, &renderer->graphicsPipeline);
+    VkCommandPoolCreateInfo commandPoolInfo = { 0 };
+    commandPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    commandPoolInfo.pNext = NULL;
+    commandPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    commandPoolInfo.queueFamilyIndex = queueFamilyIndex;
+    
+
+    vkCall(vkCreateCommandPool(renderer->logicalDevice, &commandPoolInfo, NULL, &renderer->commandPool),
+            "command pool created",
+            "command pool not created");
+}
+
+void createFrames(Renderer *renderer)
+{
+    renderer->frames = allocFrame(renderer);
+}
+
+Frame allocFrame(Renderer *renderer)
+{
+    Frame f = { 0 };
+    f.cmd = allocCommandBuffer(renderer->commandPool, renderer->logicalDevice);
+    return f;
 }
 
 void setupDebugMessenger(Renderer *renderer)
@@ -591,6 +733,57 @@ VkShaderModule createShaderModule(VkDevice logicalDevice, const char *shader)
     free(fileInfo.byteCode);
 
     return shaderModule;
+}
+
+VkCommandBuffer allocCommandBuffer(VkCommandPool commandPool, VkDevice ldevice)
+{
+    VkCommandBuffer cmd;
+    VkCommandBufferAllocateInfo allocInfo = { 0 };
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.pNext = NULL;
+    allocInfo.commandPool = commandPool;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandBufferCount = 1;
+
+    vkCall(vkAllocateCommandBuffers(ldevice, &allocInfo, &cmd),
+            NULL,
+            "failed to create command buffer");
+
+    return cmd;
+}
+
+void transitionImageLayout(
+    VkCommandBuffer cmd,
+    VkImage image,
+    VkImageLayout oldLayout,
+    VkImageLayout newLayout,
+    VkAccessFlags2 srcAccesFlags,
+    VkAccessFlags2 dstAccesFlags,
+    VkPipelineStageFlags2 srcStageFlags,
+    VkPipelineStageFlags2 dstStageFlags)
+{
+    VkImageMemoryBarrier2 barrier = { 0 };
+    barrier.oldLayout = oldLayout;
+    barrier.newLayout = newLayout;
+    barrier.srcAccessMask = srcAccesFlags;
+    barrier.dstAccessMask = dstAccesFlags;
+    barrier.srcStageMask = srcStageFlags;
+    barrier.dstStageMask = dstStageFlags;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.baseMipLevel = 0;
+
+    VkDependencyInfo dependencyInfo = { 0 };
+    dependencyInfo.dependencyFlags = 0;
+    dependencyInfo.imageMemoryBarrierCount = 1;
+    dependencyInfo.pImageMemoryBarriers = &barrier;
+
+    vkCmdPipelineBarrier2(cmd, &dependencyInfo);
 }
 
 VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(

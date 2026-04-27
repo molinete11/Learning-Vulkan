@@ -23,6 +23,11 @@ int main(){
         if(e == X11_CLOSE_WINDOW){
             is_running = 0;
         }
+
+
+        Frame frame = beginRenderning(&renderer);
+        renderTriangle(&frame);
+        endRendering(&renderer, &frame);
     }
     
     return EXIT_SUCCESS;
